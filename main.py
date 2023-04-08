@@ -45,8 +45,9 @@ class PID(object): #класс ПИД регулятора
         output = self._kp * P + self._ki * I + self._kd * D #расчёт управляющего сигнала
         self._timestamp = timestamp #прошлое время
         self._prev_error = error #прошлая ошибка
-        return output
+        return output #возвращение выхода
 
+# ?
 def keep_depth(depth_to_set, speed):
     try:
         error = auv.get_depth() - depth_to_set
@@ -80,6 +81,7 @@ def keep_yaw(yaw_to_set, speed):
         keep_yaw.regulator.set_p_gain(0.8)
         keep_yaw.regulator.set_i_gain(0)
         keep_yaw.regulator.set_d_gain(300)
+# ?
 
 def find_yellow_circle(img):
     image_hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
@@ -90,26 +92,48 @@ def find_yellow_circle(img):
     if cnt:
         for c in cnt:
             moments = cv.moments(c)
+
+            (_, _), radius = cv.minEnclosingCircle(c)
+            circle_area = radius ** 2 * math.pi
+
             try:
                 x = int(moments["m10"] / moments["m00"])
                 y = int(moments["m01"] / moments["m00"])
-                return True, x, y
+                return True, x, y, circle_area
             except ZeroDivisionError:
-                return False, 0, 0
+                return False, 0, 0, 0
     else:
-        return False, 0, 0
+        return False, 0, 0, 0
 
 
 def stab_on_yellow_circle(image):
-    found, x, y = find_yellow_circle(image)
-    speed = 50
+    found, x, y, circle_area = find_yellow_circle(image)
+    speed = 10
+
+    def clamp_to180(angle):
+        if angle > 180.0:
+            return angle - 360
+        if angle < -180.0:
+            return angle + 360
+        return angl
     if found:
-        x_center = x - (320 / 2)
-        y_center = y - (240 / 2)
-        print(x_center)
+
+        image_area = 320*240
+        a = image_area / circle_area
+
+        x = x - (320 / 2)
+        y = y - (240 / 2)
+        roll_to_set = 0
+
+        alfa = math.degrees(math.atan((x/160) * math.tan(59/2)))
+        beta = math.degrees(math.atan((y/120) * math.tan(46/2)))
+        error = auv.get_roll() - roll_to_set
+
+        print(a)
         try:
-            output_x = stab_on_yellow_circle.regulator_forward.process(x_center)
-            output_y = stab_on_yellow_circle.regulator_side.process(y_center)
+            output_x = stab_on_yellow_circle.regulator_forward.process(alfa)
+            output_y = stab_on_yellow_circle.regulator_side.process(beta)
+            output_roll = stab_on_yellow_circle.regulator_roll.process(error)
 
             output_x = clamp(output_x, 50, -50)
             output_y = clamp(output_y, 50, -50)
@@ -120,17 +144,22 @@ def stab_on_yellow_circle(image):
             auv.set_motor_power(2,  -output_y)
             auv.set_motor_power(3,  -output_y)
 
-            #auv.set_motor_power(4, -output_x)
+            auv.set_motor_power(4, output_roll)
         except AttributeError:
             stab_on_yellow_circle.regulator_forward = PID()
-            stab_on_yellow_circle.regulator_forward.set_p_gain(0.2)
+            stab_on_yellow_circle.regulator_forward.set_p_gain(0.5)
             stab_on_yellow_circle.regulator_forward.set_i_gain(0)
             stab_on_yellow_circle.regulator_forward.set_d_gain(0)
 
             stab_on_yellow_circle.regulator_side = PID()
-            stab_on_yellow_circle.regulator_side.set_p_gain(0.8)
+            stab_on_yellow_circle.regulator_side.set_p_gain(0.5)
             stab_on_yellow_circle.regulator_side.set_i_gain(0)
-            stab_on_yellow_circle.regulator_side.set_d_gain(300)
+            stab_on_yellow_circle.regulator_side.set_d_gain(0)
+
+            stab_on_yellow_circle.regulator_roll = PID()
+            stab_on_yellow_circle.regulator_roll.set_p_gain(0.5)
+            stab_on_yellow_circle.regulator_roll.set_i_gain(0)
+            stab_on_yellow_circle.regulator_roll.set_d_gain(0)
     return False
 
 
