@@ -1,14 +1,22 @@
 import pymurapi as mur
 import cv2 as cv
+import numpy as numpy
+import matplotlib.pyplot as plt
 import math
 import time
 import enum
+
 
 auv = mur.mur_init()
 
 class Data(enum.IntEnum):
     hight_image = 320
     weight_image = 240
+    vertical_angle = 46
+    horizontal_angle = 59
+    hue_min = 20
+    hue_max = 40
+
 
 def invert(v):
     if (v >= 0):
@@ -31,6 +39,14 @@ def clamp_to180(angle):
         return angle + 360
     return angle
 
+def flow():
+    mean = 0
+    std = 1
+    num_samples = 1000
+    samples = numpy.random.normal(mean, std, size=num_samples)
+
+    plt.plot(samples)
+    plt.show(block=True)
 
 class PID(object):  # класс ПИД регулятора
     _kp = 0.0
@@ -74,8 +90,8 @@ class PID(object):  # класс ПИД регулятора
 
 def find_yellow_circle(img):
     image_hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
-    hsv_min = (20, 0, 0)
-    hsv_max = (40, 255, 255)
+    hsv_min = (Data.hue_min, 0, 0)
+    hsv_max = (Data.hue_max, 255, 255)
     image_bin = cv.inRange(image_hsv, hsv_min, hsv_max)
     cnt, _ = cv.findContours(image_bin, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE)
     if cnt:
@@ -108,21 +124,24 @@ def stab_on_yellow_circle(image):
         image_area = Data.hight_image * Data.weight_image
         area_circle = image_area / circle_area
 
-        if (area_circle <= 2):
-            return False
+        if (area_circle <= 3):
+            return True, 0
 
-        x = x - (320 / 2)
-        y = y - (240 / 2)
+        print(area_circle)
 
-        alfa = math.degrees(math.atan((x / 160) * math.tan(59 / 2)))
-        beta = math.degrees(math.atan((y / 120) * math.tan(46 / 2)))
-        error = 1 - area_approx_rectangle
+        x = x - (Data.hight_image / 2)
+        y = y - (Data.weight_image / 2)
+
+        alfa = math.degrees(math.atan((x / (Data.hight_image / 2)) * math.tan(Data.horizontal_angle / 2)))
+        beta = math.degrees(math.atan((y / (Data.weight_image / 2)) * math.tan(Data.vertical_angle / 2)))
+
+        error_approx_rectangle = 1 - area_approx_rectangle
 
         try:
             output_x = stab_on_yellow_circle.regulator_x.process(alfa, x)
             output_y = stab_on_yellow_circle.regulator_y.process(beta, y)
             output_speed = stab_on_yellow_circle.regulator_speed.process(area_circle, 0)
-            output_roll = stab_on_yellow_circle.regulator_roll.process(error, area_approx_rectangle)
+            output_roll = stab_on_yellow_circle.regulator_roll.process(error_approx_rectangle, area_approx_rectangle)
 
             output_x = clamp(output_x, 50, -50)
             output_y = clamp(output_y, 50, -50)
@@ -156,10 +175,25 @@ def stab_on_yellow_circle(image):
             stab_on_yellow_circle.regulator_roll.set_p_gain(100)
             stab_on_yellow_circle.regulator_roll.set_i_gain(0)
             stab_on_yellow_circle.regulator_roll.set_d_gain(0)
-    return False
+        return False, area_circle  #возвражение ошибки для построения графика
+    return False, 0
 
+y = []
+
+tic = time.perf_counter()
 while True:
     image = auv.get_image_front()
-    if (stab_on_yellow_circle(image)):
+    done , error = (stab_on_yellow_circle(image))
+    y.append(error)
+    if done:
         break
     time.sleep(0.05)
+toc = time.perf_counter()
+time_execution = toc - tic
+
+print(toc - tic)
+
+x = numpy.arange(0.0, time_execution, time_execution/len(y))
+
+plt.plot(x,y)
+plt.show()
